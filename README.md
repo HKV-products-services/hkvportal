@@ -1,6 +1,9 @@
 # hkvfewspy
 python wrapper for data portal
 
+# installation
+`pip install hkvportal`
+
 # usage
 `from hkvportal.services import dataportal as dp`
 
