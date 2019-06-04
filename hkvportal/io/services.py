@@ -6,28 +6,17 @@
 ################################
 #### Author: Mattijn van Hoek ##
 ####  While working for HKV   ##
-####     Date 2017/06/28      ##
-####     Version: 0.1.1       ##
+####     Date 2017-2019       ##
+####     Version: 0.2.1       ##
 ################################
 import zeep
-from datetime import datetime, timezone, timedelta
-import pytz
 import pandas as pd
 from hkvportal.io import untangle
-import geopandas as gpd
-import json
-import types
-from shapely.geometry import Point
 import io
-import gzip
+import json
 import requests
 import urllib.parse
 import fire
-
-try:
-    get_ipython().magic('matplotlib inlinde')
-except:
-    pass
 
 
 # In[2]:
@@ -111,6 +100,8 @@ class dataportal(object):
         
         # Set data using create datarecord
         zeep_out = self.client.service.create(database=database, key=key,description=description,data=data)
+        url = urllib.parse.urljoin(self.dataservice,'data.asmx/read2?database='+database+'&key='+key+'&contentType=SET_BY_USER')
+        print ('available at {}'.format(url))        
         return json.loads(zeep_out)
 
     def updateEntryDatabase(self,database,key,data,description=''):
@@ -135,7 +126,7 @@ class dataportal(object):
         zeep_out = self.client.service.update(database=database, key=key,description=description,data=data)
         return json.loads(zeep_out)        
 
-    def getEntryDatabase(self,database, key):
+    def getEntryDatabase(self, database, key, content_type="application/json"):
         """
         Get entry after create/insert
         
@@ -144,14 +135,27 @@ class dataportal(object):
         database: str
             name of database instance (eg. 'Myanmar') 
         key: str
-            key to identify datarecord in the database (eg. 'parameter|location|unit')       
+            key to identify datarecord in the database (eg. 'parameter|location|unit')
+        content_type: str
+            set the contentType to make the browser render the output correctly
+            csv : application/csv
+            json : application/json
+            html : text/html
         """
         if not hasattr(self, 'dataservice'):
             self.errors.nosetDataservice()        
-        url = urllib.parse.urljoin(self.dataservice,'data.asmx/read?database='+database+'&key='+key)
+        url = urllib.parse.urljoin(self.dataservice,'data.asmx/read2?database='+database+'&key='+key+'&contentType='+content_type)
         print (url)
         r = requests.get(url)
-        return r.json()
+        if 'json' in content_type:
+            output = r.json()
+        elif 'csv' in content_type:
+            s = r.content
+            output = pd.read_csv(io.StringIO(s.decode('utf-8')))
+        else:
+            output = r.content
+          
+        return output
 
     def deleteEntryDatabase(self,database, key):
         """
