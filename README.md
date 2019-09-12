@@ -5,12 +5,15 @@ python wrapper for data portal
 `pip install hkvportal`
 
 # usage
-`from hkvportal.services import dataportal as dp`
+```
+import hkvportal
+dp = hkvportal.Service(url, [uid])
+```
 
-In de dataportal kunnen verschillende databases worden aangemaakt (`createDatabase`). In een bestaande database mogen entries worden:
+In de dataportal kan een database worden aangemaakt (`createDatabase`). In een bestaande database mogen entries worden:
 - aangemaakt (`setEntry`)
 - bijgewerkt (`updateEntry`)
 - opgehaald (`getEntry`) of 
 - verwijderd (`deleteEntry`)
 
-in the notebook folder is placed a jupyter notebook with more examples.
+in the notebook folder zijn een aantal jupyter notebooks met meer voorbeelden.
