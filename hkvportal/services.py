@@ -18,35 +18,55 @@ class Service(object):
     mangrove service to create/update databases, set and get entries.
     """
 
-    def __init__(self, dataservice, uid=None):
+    def __init__(self, dataservice, uid):
         """
         set URL for dataservice to be used
         
         Parameters
         ----------
         dataservice: str
-            URL of dataservice instance (eg. 'http://85.17.82.66/dataservices/')   
+            URL of dataservice instance (eg. 'https://tsws.hkvservices.nl/mangrove.ws/')   
         uid: str
             User Identification ID. Request by IT               
         """
-        self.setDataservice(dataservice)
+        
+        self.dataservice(dataservice)
+        self.uid = uid
     
     class errors(object):
         """
         error class with different errors to provide for fewsPi
         """
 
-        def nosetDataservice():
+        def noset_dataservice():
             raise AttributeError(
                 "dataservice not known. set first using function setDataservice()"
             )
+            
+        def database_not_exist():
+            raise AttributeError(
+                "used database does not exist"
+            )
 
-        def inputDataType():
+        def key_not_exist():
+            raise AttributeError(
+                "used key does not exist in database"
+            )            
+
+        def input_data_type():
             raise AttributeError(
                 "input type of data is not recognized. Choose between type str, io.StringIO or io.BytesIO"
             )
+        
+    def get_url(self, database, key, content_type='SET_BY_USER'):        
+        url = urllib.parse.urljoin(
+            self._dataservice,
+            "?function=dataportal.db.getdata&parameters={{database:'{}',key:'{}'}}&contentType={}".format(database, key, content_type)
+        )
+        print("entry available at:\n{}".format(url))
+        return url
             
-    def serializeData(self, data):
+    def serialize_data(self, data):
         if isinstance(data, str):
             data = data.encode()
         elif isinstance(data, io.StringIO):
@@ -56,34 +76,35 @@ class Service(object):
         elif isinstance(data, bytes):
             pass
         else:
-            self.errors.inputDataType()
+            self.errors.input_data_type()
             
         return data
 
-    def setDataservice(self, dataservice, dump=False):
+    def dataservice(self, dataservice, dump=False):
         """
         function to set URL for dataservice to be used in other functions
         
         Parameters
         ----------
         dataservice: str
-            URL of dataservice instance (eg. 'http://85.17.82.66/dataservices/')
+            URL of dataservice instance (eg. 'https://tsws.hkvservices.nl/mangrove.ws/')
         """
-        setattr(Service, "dataservice", dataservice)
-        wsdl = urllib.parse.urljoin(
-            self.dataservice, "data.asmx?WSDL"
-        )
-        self.client = zeep.Client(wsdl=wsdl)
+        self._dataservice = urllib.parse.urljoin(dataservice, "data.ashx")
+        self._call = urllib.parse.urljoin(dataservice, "entry.asmx/Call?")
+        self._wsdl = urllib.parse.urljoin(dataservice, "entry.asmx?WSDL")
+        settings = zeep.Settings(strict=False, raw_response=True)
+        
+        self.client = zeep.Client(wsdl=self._wsdl, settings=settings)
         if dump == False:
             return print(
                 "Dataservice is recognized.",
-                self.dataservice,
+                self._wsdl,
                 "will be used as portal",
             )
         if dump == True:
             return self.client.wsdl.dump()
 
-    def createDatabase(self, database):
+    def create_database(self, database):
         """
         Create database
         
@@ -95,14 +116,15 @@ class Service(object):
         if not hasattr(self, "dataservice"):
             self.errors.nosetDataservice()
 
-        url = urllib.parse.urljoin(
-            self.dataservice,
-            "database.asmx/create?database=" + database,
-        )
-        r = requests.get(url)
+        parameters = {
+            "uid": self.uid,
+            "database":database}
+        payload = {'function':'dataportal.db.createdatabase','parameters':json.dumps(parameters)}
+        r = requests.get(self._call, payload)            
+            
         return r.json()
 
-    def listDatabase(self, database):
+    def info(self, database):
         """
         Check database info
         
@@ -112,19 +134,19 @@ class Service(object):
             name of database instance (eg. 'Myanmar')        
         """
         if not hasattr(self, "dataservice"):
-            self.errors.nosetDataservice()
-        url = urllib.parse.urljoin(
-            self.dataservice,
-            "data.asmx/list?database=" + database,
-        )
-        r = requests.get(url)
+            self.errors.noset_dataservice()
+
+        parameters = {"database":database}
+        payload = {'function':'dataportal.db.getinfo','parameters':json.dumps(parameters)}
+        r = requests.get(self._call, payload)
+
         return r.json()
 
-    def setEntryDatabase(
-        self, database, key, data, description=""
-    ):
+    def new_entry(self, database, key, data, description="", info_db=False):
         """
-        Set/create/insert new entry in database
+        Set/create/insert a NEW entry in database. 
+        This does not overwrite, or update existing entries.
+        Use update_entry for updating existing entries
         
         Parameters
         ----------
@@ -136,35 +158,28 @@ class Service(object):
             object to store in the datarecord (eg. JSON object)
         description: str
             description of the datarecord (default = '')
+        info_db: boolean
+            if True also output debug information from the database
         """
         
-        data = self.serializeData(data)
+        data = self.serialize_data(data)
 
         if not hasattr(self, "dataservice"):
-            self.errors.nosetDataservice()
+            self.errors.noset_dataservice()
 
-        # Set data using create datarecord
+        parameters = {
+            "uid":self.uid,
+            "database":database,
+            "key":key,
+            "description":description}
 
-        zeep_out = self.client.service.createbytes(
-            database=database,
-            key=key,
-            description=description,
-            data=data,
-        )
-        url = urllib.parse.urljoin(
-            self.dataservice,
-            "data.ashx?database="
-            + database
-            + "&key="
-            + key
-            + "&contentType=SET_BY_USER",
-        )
-        print("available at {}".format(url))
-        return json.loads(zeep_out)
+        zeep_out = self.client.service.CallBytes(function="dataportal.db.createentry", parameters=json.dumps(parameters), bytes=data)
+        self.get_url(database, key)
 
-    def updateEntryDatabase(
-        self, database, key, data, description=""
-    ):
+        if info_db:
+            return json.loads(zeep_out.text)
+
+    def update_entry(self, database, key, data, description="", info_db=False):
         """
         Update existing  entry in database
         
@@ -178,23 +193,28 @@ class Service(object):
             object to store in the datarecord (eg. JSON object)
         description: str
             description of the datarecord (default = '')
+        info_db: boolean
+            if True also output debug information from the database            
         """
         
-        data = self.serializeData(data)
+        data = self.serialize_data(data)
         
         if not hasattr(self, "dataservice"):
-            self.errors.nosetDataservice()
+            self.errors.noset_dataservice()
 
-        # Set data using updatebytes function
-        zeep_out = self.client.service.updatebytes(
-            database=database,
-            key=key,
-            description=description,
-            data=data,
-        )
-        return json.loads(zeep_out)
+        parameters = {
+            "uid": self.uid,
+            "database":database,
+            "key":key,
+            "description":description}
 
-    def getEntryDatabase(
+        zeep_out = self.client.service.CallBytes(function="dataportal.db.UpdateEntry", parameters=json.dumps(parameters), bytes=data)
+        self.get_url(database, key)
+        
+        if info_db:
+            return json.loads(zeep_out.text)
+
+    def get_entry(
         self, database, key, content_type="application/json"
     ):
         """
@@ -213,43 +233,36 @@ class Service(object):
             html : text/html
         """
         if not hasattr(self, "dataservice"):
-            self.errors.nosetDataservice()
-        url = urllib.parse.urljoin(
-            self.dataservice,
-            "data.ashx?database="
-            + database
-            + "&key="
-            + key
-            + "&contentType="
-            + content_type,
-        )
-        print(url)
+            self.errors.noset_dataservice()
+        url = self.get_url(database, key, content_type)
         
+        r = requests.get(url)
+        # check for errors
+        if r.text == 'database does not exists':
+            self.errors.database_not_exist()
+        elif r.text == 'Object reference not set to an instance of an object.':
+            self.errors.key_not_exist()
+        
+        # parse input dta
         if "json" in content_type:
-            r = requests.get(url)
             output = pd.read_json(r.content.decode())            
         elif "html" in content_type:
             from IPython.display import IFrame
             output = IFrame(url, width='100%', height=350)
         elif "csv" in content_type:
-            r = requests.get(url)
             output = pd.read_csv(io.StringIO(r.content.decode("utf-8")))
         elif "png" in content_type:
             from PIL import Image               
             from IPython.display import display
-            r = requests.get(url)
             img = Image.open(io.BytesIO(r.content))
             output = display(img)
         elif "svg" in content_type:
             from IPython.display import SVG, display
-            r = requests.get(url)
             output = display(SVG(r.content.decode()))
         elif "xml" in content_type:
             from .untangle import parse_raw
-            r = requests.get(url)
             output = parse_raw(r.content.decode())            
         else:
-            r = requests.get(url)
             try:
                 output = r.content.decode()
             except UnicodeDecodeError:
@@ -258,7 +271,7 @@ class Service(object):
 
         return output
 
-    def deleteEntryDatabase(self, database, key):
+    def delete_entry(self, database, key):
         """
         Delete entry from database
         
@@ -270,14 +283,12 @@ class Service(object):
             key to identify datarecord in the database (eg. 'parameter|location|unit')       
         """
         # delete data from database
-        if not hasattr(self, "dataservice"):
-            self.errors.nosetDataservice()
-        url = urllib.parse.urljoin(
-            self.dataservice,
-            "data.asmx/delete?database="
-            + database
-            + "&key="
-            + key,
-        )
-        r = requests.get(url)
+        parameters = {
+            "uid": self.uid,
+            "database":database, 
+            "key":key}
+
+        payload = {'function':'dataportal.db.DeleteEntry','parameters':json.dumps(parameters)}
+        r = requests.get(self._call, payload)        
+        
         return r.json()
